@@ -32,10 +32,14 @@ Create a `.env.local` file in the root directory with the following variables:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 NEXT_PUBLIC_ADMIN_PASSWORD=your_admin_password_here
 ```
 
-**Note:** The admin password can also be set as `ADMIN_PASSWORD` (server-side only) for better security, but `NEXT_PUBLIC_ADMIN_PASSWORD` will work for MVP.
+**Note:** 
+- `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are required for server-side operations that bypass RLS (like updating sites and inserting risk signals). These should be kept secret and never exposed to the client.
+- The admin password can also be set as `ADMIN_PASSWORD` (server-side only) for better security, but `NEXT_PUBLIC_ADMIN_PASSWORD` will work for MVP.
 
 ### 4. Run the Development Server
 

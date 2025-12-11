@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calculateRiskScore } from "@/lib/riskScore";
 
 export async function POST(request: NextRequest) {
@@ -48,8 +49,8 @@ export async function POST(request: NextRequest) {
       severity = 4;
     }
 
-    // Insert risk signal
-    const { error: signalError } = await supabase
+    // Insert risk signal (requires admin client to bypass RLS)
+    const { error: signalError } = await supabaseAdmin
       .from("risk_signals")
       .insert({
         site_id,
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch all signals for the site
-    const { data: signals, error: signalsError } = await supabase
+    const { data: signals, error: signalsError } = await supabaseAdmin
       .from("risk_signals")
       .select("*")
       .eq("site_id", site_id);
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
     const { score, level } = calculateRiskScore(signals || []);
 
     // Get current site data
-    const { data: site, error: siteError } = await supabase
+    const { data: site, error: siteError } = await supabaseAdmin
       .from("sites")
       .select("total_reports, total_signals")
       .eq("id", site_id)
@@ -97,8 +98,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update site with new risk score and counts
-    const { error: updateError } = await supabase
+    // Update site with new risk score and counts (requires admin client to bypass RLS)
+    const { error: updateError } = await supabaseAdmin
       .from("sites")
       .update({
         risk_score: score,

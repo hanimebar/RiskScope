@@ -3,6 +3,7 @@ import Link from "next/link";
 import RiskBadge from "@/components/RiskBadge";
 import ReportForm from "@/components/ReportForm";
 import { supabase } from "@/lib/supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { normalizeDomain } from "@/lib/domainUtils";
 import { calculateRiskScore } from "@/lib/riskScore";
 import type { Site, RiskSignal, UserReport } from "@/types";
@@ -63,9 +64,9 @@ async function getSiteData(siteId: string) {
   // Calculate risk score
   const { score, level } = calculateRiskScore(signals);
 
-  // Update site if score/level changed
+  // Update site if score/level changed (requires admin client to bypass RLS)
   if (score !== site.risk_score || level !== site.risk_level) {
-    await supabase
+    await supabaseAdmin
       .from("sites")
       .update({
         risk_score: score,

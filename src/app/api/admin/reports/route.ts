@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { calculateRiskScore } from "@/lib/riskScore";
 
 export async function GET(request: NextRequest) {
   try {
     // Fetch reports with status 'new' or 'confirmed'
-    const { data: reports, error } = await supabase
+    const { data: reports, error } = await supabaseAdmin
       .from("user_reports")
       .select(
         "id, site_id, report_type, description, country, order_value_band, status, created_at"
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
     // Fetch site domains for each report
     const siteIds = [...new Set(reports?.map((r) => r.site_id) || [])];
-    const { data: sites } = await supabase
+    const { data: sites } = await supabaseAdmin
       .from("sites")
       .select("id, domain")
       .in("id", siteIds);
@@ -57,7 +57,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     // Update report status
-    const { data: report, error: updateError } = await supabase
+    const { data: report, error: updateError } = await supabaseAdmin
       .from("user_reports")
       .update({ status })
       .eq("id", report_id)
@@ -74,7 +74,7 @@ export async function PATCH(request: NextRequest) {
 
     // If status is 'confirmed', add an admin risk signal
     if (status === "confirmed" && report) {
-      const { error: signalError } = await supabase
+      const { error: signalError } = await supabaseAdmin
         .from("risk_signals")
         .insert({
           site_id: report.site_id,
@@ -91,7 +91,7 @@ export async function PATCH(request: NextRequest) {
       }
 
       // Recalculate risk score
-      const { data: signals, error: signalsError } = await supabase
+      const { data: signals, error: signalsError } = await supabaseAdmin
         .from("risk_signals")
         .select("*")
         .eq("site_id", report.site_id);
@@ -99,13 +99,13 @@ export async function PATCH(request: NextRequest) {
       if (!signalsError && signals) {
         const { score, level } = calculateRiskScore(signals);
 
-        const { data: site } = await supabase
+        const { data: site } = await supabaseAdmin
           .from("sites")
           .select("total_signals")
           .eq("id", report.site_id)
           .single();
 
-        await supabase
+        await supabaseAdmin
           .from("sites")
           .update({
             risk_score: score,
