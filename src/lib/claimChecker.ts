@@ -1,6 +1,5 @@
 // src/lib/claimChecker.ts
 import { supabaseAdmin } from './supabaseAdmin';
-import { fetchStoreMetrics, StoreMetrics } from './storeMetricsAdapter';
 
 type ClaimInput = {
   appName?: string;
@@ -101,96 +100,99 @@ export async function runClaimCheck(input: ClaimInput) {
 
   if (claimError) throw claimError;
 
-  // 3) Fetch metrics (dummy for now)
-  const storeMetrics: StoreMetrics = await fetchStoreMetrics({ iosAppId, androidPackage });
+  // 3) Load metrics from Supabase
+  const { data: metrics, error: metricsError } = await supabaseAdmin
+    .from('verification_metrics')
+    .select('*')
+    .eq('product_id', product.id);
 
-  const metricsToInsert: Array<{
-    product_id: string;
-    source: string;
-    metric_name: string;
-    metric_value: number;
-  }> = [];
+  if (metricsError) throw metricsError;
 
-  const source = iosAppId ? 'ios_store' : androidPackage ? 'android_store' : 'store_unknown';
+  // 4) Build metrics map
+  const metricsMap = new Map<string, number>();
+  let hasVerifiedRevenue = false;
+  let verifiedRevenue30d = 0;
 
-  if (storeMetrics.downloadsLifetime != null) {
-    metricsToInsert.push({
-      product_id: product.id,
-      source,
-      metric_name: 'downloads_lifetime',
-      metric_value: storeMetrics.downloadsLifetime,
-    });
-  }
-  if (storeMetrics.downloads30d != null) {
-    metricsToInsert.push({
-      product_id: product.id,
-      source,
-      metric_name: 'downloads_30d',
-      metric_value: storeMetrics.downloads30d,
-    });
-  }
-  if (storeMetrics.ratingCount != null) {
-    metricsToInsert.push({
-      product_id: product.id,
-      source,
-      metric_name: 'rating_count',
-      metric_value: storeMetrics.ratingCount,
-    });
-  }
-  if (storeMetrics.avgRating != null) {
-    metricsToInsert.push({
-      product_id: product.id,
-      source,
-      metric_name: 'avg_rating',
-      metric_value: storeMetrics.avgRating,
-    });
-  }
-  if (storeMetrics.priceUsd != null) {
-    metricsToInsert.push({
-      product_id: product.id,
-      source,
-      metric_name: 'price_usd',
-      metric_value: storeMetrics.priceUsd,
-    });
+  for (const m of metrics ?? []) {
+    const key = `${m.source}:${m.metric_name}`;
+    metricsMap.set(key, m.metric_value);
+
+    if (m.metric_name === 'revenue_30d_verified' && m.is_verified) {
+      hasVerifiedRevenue = true;
+      verifiedRevenue30d = m.metric_value;
+    }
   }
 
-  if (metricsToInsert.length > 0) {
-    const { error: vmError } = await supabaseAdmin
-      .from('verification_metrics')
-      .insert(metricsToInsert);
-    if (vmError) throw vmError;
-  }
+  // 5) Extract store-based estimates
+  const downloadsLifetime =
+    metricsMap.get('android_store:downloads_lifetime') ??
+    metricsMap.get('ios_store:downloads_lifetime') ??
+    0;
 
-  // 4) Simple plausibility assessment
-  const downloadsLifetime = storeMetrics.downloadsLifetime ?? 0;
-  const priceUsd = storeMetrics.priceUsd ?? 0;
+  const priceUsd =
+    metricsMap.get('android_store:price_usd') ??
+    metricsMap.get('ios_store:price_usd') ??
+    0;
 
+  // 6) Assessment logic
   let maxPlausibleEstimate: number | null = null;
   let verdict: 'verified' | 'plausible' | 'unlikely' | 'no_evidence' = 'no_evidence';
-  let confidence = 0.3;
-  let notes = 'Not enough data to make a strong call.';
+  let confidence = 0.2;
+  let notes = 'No app store or payment metrics found for this product yet. Run enrichment workers to populate data.';
 
-  if (downloadsLifetime > 0 && priceUsd > 0) {
-    const est = (downloadsLifetime * 0.05 * priceUsd) / 3; // rough as hell
+  // Check if we have verified revenue
+  if (hasVerifiedRevenue && verifiedRevenue30d > 0) {
+    const verifiedMonthlyEstimate = verifiedRevenue30d; // Already 30-day revenue
+    const ratio = numericClaimedValue / verifiedMonthlyEstimate;
+    
+    if (ratio >= 0.95 && ratio <= 1.05) {
+      verdict = 'verified';
+      confidence = 0.95;
+      notes = `Claimed revenue ($${numericClaimedValue.toLocaleString()}) matches verified 30-day revenue ($${verifiedMonthlyEstimate.toLocaleString()}).`;
+      maxPlausibleEstimate = verifiedMonthlyEstimate;
+    } else if (ratio >= 0.8 && ratio < 0.95) {
+      verdict = 'plausible';
+      confidence = 0.85;
+      notes = `Claimed revenue ($${numericClaimedValue.toLocaleString()}) is slightly below verified 30-day revenue ($${verifiedMonthlyEstimate.toLocaleString()}), which is plausible.`;
+      maxPlausibleEstimate = verifiedMonthlyEstimate;
+    } else if (ratio > 1.05 && ratio <= 1.2) {
+      verdict = 'plausible';
+      confidence = 0.8;
+      notes = `Claimed revenue ($${numericClaimedValue.toLocaleString()}) is slightly above verified 30-day revenue ($${verifiedMonthlyEstimate.toLocaleString()}), which could be plausible with additional revenue streams.`;
+      maxPlausibleEstimate = verifiedMonthlyEstimate;
+    } else {
+      verdict = 'unlikely';
+      confidence = 0.9;
+      notes = `Claimed revenue ($${numericClaimedValue.toLocaleString()}) significantly differs from verified 30-day revenue ($${verifiedMonthlyEstimate.toLocaleString()}).`;
+      maxPlausibleEstimate = verifiedMonthlyEstimate;
+    }
+  } else if (downloadsLifetime > 0 && priceUsd > 0) {
+    // Fall back to store-based estimates
+    const est = (downloadsLifetime * 0.05 * priceUsd) / 3; // rough estimate
     maxPlausibleEstimate = est;
 
     if (numericClaimedValue <= est * 0.5) {
       verdict = 'plausible';
       confidence = 0.7;
-      notes = `Based on ~${downloadsLifetime} lifetime downloads and price ~$${priceUsd}, a rough upper bound monthly revenue is about $${est.toFixed(
+      notes = `Based on ~${downloadsLifetime.toLocaleString()} lifetime downloads and price ~$${priceUsd}, a rough upper bound monthly revenue is about $${est.toFixed(
         0
       )}. The claim is below that, so it seems plausible.`;
     } else if (numericClaimedValue > est * 2) {
       verdict = 'unlikely';
       confidence = 0.8;
-      notes = `Based on ~${downloadsLifetime} lifetime downloads and price ~$${priceUsd}, a rough upper bound monthly revenue is about $${est.toFixed(
+      notes = `Based on ~${downloadsLifetime.toLocaleString()} lifetime downloads and price ~$${priceUsd}, a rough upper bound monthly revenue is about $${est.toFixed(
         0
-      )}. The claim ($${numericClaimedValue}) is far above that, so it looks unlikely.`;
+      )}. The claim ($${numericClaimedValue.toLocaleString()}) is far above that, so it looks unlikely.`;
     } else {
       verdict = 'plausible';
       confidence = 0.5;
       notes = `The claim is in the same ballpark as a rough estimate based on downloads and price, but the data is noisy.`;
     }
+  } else if (metrics && metrics.length === 0) {
+    // No metrics at all
+    verdict = 'no_evidence';
+    confidence = 0.2;
+    notes = 'No app store or payment metrics found for this product yet. Run enrichment workers to populate data.';
   }
 
   const { data: assessment, error: assessError } = await supabaseAdmin
@@ -207,6 +209,10 @@ export async function runClaimCheck(input: ClaimInput) {
     .single();
 
   if (assessError) throw assessError;
+
+  // Determine what type of metrics we have
+  const hasStoreMetrics = downloadsLifetime > 0 || priceUsd > 0 || (metrics && metrics.some(m => !m.is_verified));
+  const verifiedRevenue = hasVerifiedRevenue ? verifiedRevenue30d : null;
 
   return {
     product: {
@@ -230,11 +236,17 @@ export async function runClaimCheck(input: ClaimInput) {
       maxPlausibleEstimate: assessment.max_plausible_estimate,
       notes: assessment.notes,
     },
-    metrics: metricsToInsert.map((m) => ({
+    metrics: (metrics || []).map((m) => ({
       source: m.source,
       metricName: m.metric_name,
       metricValue: m.metric_value,
+      isVerified: m.is_verified || false,
     })),
+    verification: {
+      hasVerifiedRevenue,
+      hasStoreMetrics,
+      verifiedRevenue,
+    },
   };
 }
 

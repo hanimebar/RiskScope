@@ -7,15 +7,23 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "metrics:android": "tsx scripts/enrichAndroidMetrics.ts",
+    "metrics:ios": "tsx scripts/enrichIosMetrics.ts",
+    "metrics:all": "npm run metrics:android && npm run metrics:ios",
+    "metrics:stripe": "tsx scripts/enrichStripeRevenue.ts",
     "crawl:queue": "ts-node --project tsconfig.scripts.json ./scripts/processQueue.ts",
-    "crawl:discover": "ts-node --project tsconfig.scripts.json ./scripts/discoverCandidates.ts"
+    "crawl:discover": "ts-node --project tsconfig.scripts.json ./scripts/discoverCandidates.ts",
+    "fetch:metrics": "ts-node --project tsconfig.scripts.json ./scripts/fetchAppMetrics.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
+    "app-store-scraper": "^0.18.0",
     "cheerio": "^1.1.2",
+    "google-play-scraper": "^10.1.2",
     "next": "14.2.33",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "stripe": "^20.0.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
@@ -28,6 +36,7 @@
     "tailwindcss": "^3.4.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.3.3"
   }
 }

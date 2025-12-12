@@ -1,4 +1,9 @@
-// src/lib/storeMetricsAdapter.ts
+/**
+ * @deprecated This adapter is no longer used.
+ * Metrics are now read directly from Supabase in claimChecker.ts
+ * This file is kept for backwards compatibility but should not be imported.
+ */
+
 export type StoreMetrics = {
   downloadsLifetime?: number;
   downloads30d?: number;
@@ -7,22 +12,13 @@ export type StoreMetrics = {
   priceUsd?: number;
 };
 
-// Dumb stub: returns fixed-but-plausible-ish numbers so the pipeline works.
-export async function fetchStoreMetrics(params: {
+/**
+ * @deprecated Use metrics from Supabase directly
+ */
+export async function fetchStoreMetrics(_params: {
   iosAppId?: string;
   androidPackage?: string;
-}): Promise<StoreMetrics> {
-  const { iosAppId, androidPackage } = params;
-
-  // You can customize these a bit so they differ per ID:
-  const baseDownloads = iosAppId ? 8000 : androidPackage ? 5000 : 2000;
-
-  return {
-    downloadsLifetime: baseDownloads,
-    downloads30d: Math.round(baseDownloads * 0.1),
-    ratingCount: 25,
-    avgRating: 4.2,
-    priceUsd: 4.99, // pretend it's a $4.99 app
-  };
+}): Promise<StoreMetrics | null> {
+  // No longer used - metrics come from Supabase
+  return null;
 }
-

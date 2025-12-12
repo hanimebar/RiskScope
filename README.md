@@ -184,6 +184,52 @@ npm run build
 npm start
 ```
 
+## Claim Checker - Hybrid Verification
+
+The Claim Checker evaluates revenue claims about mobile apps using a hybrid approach:
+
+### Architecture
+
+1. **App Store Metrics**: Real metrics from Google Play and App Store (scraped by worker scripts)
+2. **Stripe Verification**: Optional verified metrics from Stripe (when founders connect their accounts)
+3. **Hybrid Assessment**: Uses verified data when available, falls back to estimated metrics
+
+### Worker Scripts
+
+App store metrics are fetched by separate Node.js scripts that run on a VPS/Ubuntu box (not in Vercel):
+
+```bash
+# Fetch metrics for a product
+npm run fetch:metrics -- --product-id <uuid>
+
+# Or by app identifier
+npm run fetch:metrics -- --ios-app-id <app-id>
+npm run fetch:metrics -- --android-package <package-name>
+```
+
+The worker script:
+- Uses `google-play-scraper` for Android apps
+- Uses `app-store-scraper` for iOS apps
+- Stores metrics in `verification_metrics` with `is_verified = false`
+- Replaces old estimated metrics when new ones are fetched
+
+### Database Schema
+
+Run the migration to add the `is_verified` flag:
+
+```sql
+-- Run supabase/schema-claims-migration.sql
+alter table public.verification_metrics
+add column if not exists is_verified boolean not null default false;
+```
+
+### Stripe Integration (Future)
+
+The system supports Stripe verification:
+- Products can have a `stripe_account_id` mapping
+- Verified MRR from Stripe is stored with `is_verified = true`
+- When verified metrics exist, they override estimated assessments
+
 ## License
 
 ISC

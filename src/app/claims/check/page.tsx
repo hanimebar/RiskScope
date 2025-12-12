@@ -29,7 +29,13 @@ interface ClaimCheckResponse {
     source: string;
     metricName: string;
     metricValue: number;
+    isVerified?: boolean;
   }>;
+  verification: {
+    hasVerifiedRevenue: boolean;
+    hasStoreMetrics: boolean;
+    verifiedRevenue: number | null;
+  };
 }
 
 const verdictColors = {
@@ -306,6 +312,50 @@ export default function ClaimCheckPage() {
             {/* Assessment */}
             <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
               <h2 className="mb-4 text-2xl font-semibold">Assessment</h2>
+              
+              {/* Verification Status Badge */}
+              <div className="mb-4">
+                {result.verification.hasVerifiedRevenue ? (
+                  <div className="mb-3 rounded-lg bg-green-50 border border-green-200 p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="inline-flex items-center rounded-full bg-green-600 px-3 py-1 text-xs font-semibold text-white">
+                        ✓ Verified
+                      </span>
+                      <span className="text-sm font-medium text-green-800">Payment Data (Stripe)</span>
+                    </div>
+                    {result.verification.verifiedRevenue !== null && (
+                      <p className="text-sm text-green-700">
+                        Verified 30-day revenue: <span className="font-semibold">{result.claim.currency} {result.verification.verifiedRevenue.toLocaleString()}</span>
+                      </p>
+                    )}
+                  </div>
+                ) : result.verification.hasStoreMetrics ? (
+                  <div className="mb-3 rounded-lg bg-blue-50 border border-blue-200 p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+                        📊 Estimate
+                      </span>
+                      <span className="text-sm font-medium text-blue-800">Store-based estimates only</span>
+                    </div>
+                    <p className="mt-1 text-xs text-blue-700">
+                      Assessment based on app store metrics (downloads, ratings, price). Not verified with payment data.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mb-3 rounded-lg bg-gray-50 border border-gray-200 p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center rounded-full bg-gray-500 px-3 py-1 text-xs font-semibold text-white">
+                        ⚠️ No Data
+                      </span>
+                      <span className="text-sm font-medium text-gray-800">No metrics available yet</span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-700">
+                      No app store or payment metrics found for this product yet. Run enrichment workers to populate data.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="mb-4">
                 <span
                   className={`inline-flex items-center rounded-lg border px-4 py-2 font-semibold capitalize ${verdictColors[result.assessment.verdict]}`}
@@ -319,7 +369,9 @@ export default function ClaimCheckPage() {
               <p className="mb-4 text-gray-700">{result.assessment.notes}</p>
               {result.assessment.maxPlausibleEstimate !== null && (
                 <div className="rounded-lg bg-gray-50 p-4">
-                  <p className="text-sm font-medium text-gray-700">Maximum Plausible Estimate</p>
+                  <p className="text-sm font-medium text-gray-700">
+                    {result.verification.hasVerifiedRevenue ? 'Verified Revenue' : 'Maximum Plausible Estimate'}
+                  </p>
                   <p className="mt-1 text-lg font-semibold text-gray-900">
                     {result.claim.currency}{' '}
                     {result.assessment.maxPlausibleEstimate.toLocaleString(undefined, {
@@ -348,6 +400,9 @@ export default function ClaimCheckPage() {
                         <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                           Value
                         </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
+                          Status
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 bg-white">
@@ -361,6 +416,17 @@ export default function ClaimCheckPage() {
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
                             {metric.metricValue.toLocaleString()}
+                          </td>
+                          <td className="whitespace-nowrap px-6 py-4 text-sm">
+                            {metric.isVerified ? (
+                              <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">
+                                ✓ Verified
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-800">
+                                Estimate
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}
