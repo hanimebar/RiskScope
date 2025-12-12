@@ -117,6 +117,66 @@ supabase/
 └── schema.sql         # Database schema and RLS policies
 ```
 
+## Crawl Queue System
+
+The application includes a queue-based system for processing domains in batches.
+
+### Database Setup
+
+The `crawl_queue` table needs to be created. Run the updated `supabase/schema.sql` which includes:
+
+```sql
+create table public.crawl_queue (
+  id uuid primary key default gen_random_uuid(),
+  domain text not null,
+  source text not null default 'manual',
+  status text not null default 'pending',
+  attempts integer not null default 0,
+  last_error text,
+  inserted_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+```
+
+### Processing Queue
+
+Process pending domains from the queue:
+
+```bash
+npm run crawl:queue
+```
+
+This script:
+- Fetches up to 20 pending domains
+- Scrapes and analyzes each domain
+- Updates the queue status (done/failed)
+- Preserves user/admin signals when scraping
+
+### Discovery Script
+
+Discover new candidate domains from search APIs:
+
+```bash
+npm run crawl:discover
+```
+
+**Note:** The discovery script includes placeholder code for search API integration. You'll need to:
+1. Sign up for a search API provider (e.g., SerpAPI, Bing Search API)
+2. Add your API key to `.env.local`
+3. Implement the `searchWeb()` function in `scripts/discoverCandidates.ts`
+
+### Manual Queue Seeding
+
+You can manually insert domains into the queue:
+
+```sql
+insert into public.crawl_queue (domain, source)
+values
+  ('dodgyshop123.com', 'seed'),
+  ('super-cheap-sneakers.shop', 'seed'),
+  ('random-electronics-sale.xyz', 'seed');
+```
+
 ## Building for Production
 
 ```bash

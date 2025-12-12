@@ -40,3 +40,6 @@ export interface UserReport {
   created_at: string;
 }
 
+// Re-export claims types
+export * from './claims';
+

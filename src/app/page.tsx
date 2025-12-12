@@ -27,6 +27,14 @@ export default async function Home() {
       <div className="mx-auto max-w-6xl px-4 py-12">
         {/* Hero Section */}
         <div className="mb-16 text-center">
+          <div className="mb-4 flex justify-center gap-4">
+            <Link
+              href="/claims/check"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Claim Checker
+            </Link>
+          </div>
           <h1 className="mb-4 text-5xl font-bold text-gray-900">
             Check a site's scam risk before you buy.
           </h1>

@@ -53,10 +53,26 @@ create table public.user_reports (
 create index on public.user_reports (site_id);
 create index on public.user_reports (status);
 
+-- Crawl queue table
+create table public.crawl_queue (
+  id uuid primary key default gen_random_uuid(),
+  domain text not null,
+  source text not null default 'manual',
+  status text not null default 'pending',
+  attempts integer not null default 0,
+  last_error text,
+  inserted_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index on public.crawl_queue (status);
+create index on public.crawl_queue (inserted_at);
+
 -- Enable RLS on all tables
 alter table public.sites enable row level security;
 alter table public.risk_signals enable row level security;
 alter table public.user_reports enable row level security;
+alter table public.crawl_queue enable row level security;
 
 -- RLS Policies for sites
 -- Select allowed for anon
@@ -92,4 +108,8 @@ create policy "user_reports_select_anon" on public.user_reports
   using (true);
 
 -- Update/delete reserved for service_role (no public policy)
+
+-- RLS Policies for crawl_queue
+-- All operations reserved for service_role (no public policy)
+-- This table is managed by backend scripts only
 
