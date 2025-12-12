@@ -1,354 +1,240 @@
+// src/lib/claimChecker.ts
 import { supabaseAdmin } from './supabaseAdmin';
-import { fetchStoreMetrics, type StoreMetrics } from './storeMetricsAdapter';
-import type {
-  Product,
-  Claim,
-  VerificationMetric,
-  ClaimAssessment,
-} from '@/types/claims';
+import { fetchStoreMetrics, StoreMetrics } from './storeMetricsAdapter';
 
-interface ProductInput {
-  name?: string;
+type ClaimInput = {
+  appName?: string;
   primaryUrl?: string;
   iosAppId?: string;
   androidPackage?: string;
-}
-
-interface ClaimPayload {
-  claimType: string;
-  claimedValue: number;
+  claimedValue: number | string;
   currency?: string;
+  claimType?: 'mrr' | 'monthly_income';
   timeframeText?: string;
   sourceUrl?: string;
-  rawText?: string;
-}
+};
 
-interface VerificationMetricInput {
-  source: string;
-  metricName: string;
-  metricValue: number;
-  extra?: Record<string, any>;
-}
+export async function runClaimCheck(input: ClaimInput) {
+  console.log('runClaimCheck input:', input);
 
-interface AssessmentResult {
-  verdict: 'verified' | 'plausible' | 'unlikely' | 'no_evidence';
-  confidence: number;
-  maxPlausibleEstimate: number | null;
-  notes: string;
-}
+  const numericClaimedValue = Number(input.claimedValue);
 
-interface ClaimCheckResult {
-  product: Product;
-  claim: Claim;
-  assessment: ClaimAssessment;
-  metrics: VerificationMetric[];
-}
+  if (!Number.isFinite(numericClaimedValue) || numericClaimedValue <= 0) {
+    throw new Error('claimedValue must be a positive number');
+  }
 
-/**
- * Upsert a product from user input
- */
-export async function upsertProductFromInput(
-  input: ProductInput
-): Promise<Product> {
-  const { name, primaryUrl, iosAppId, androidPackage } = input;
+  const {
+    appName,
+    primaryUrl,
+    iosAppId,
+    androidPackage,
+    currency = 'USD',
+    claimType = 'mrr',
+    timeframeText,
+    sourceUrl,
+  } = input;
 
-  // Try to find existing product by iOS app ID or Android package
-  let existingProduct: Product | null = null;
+  // 1) Upsert product by ios_app_id / android_package / primary_url
+  let product: any = null;
 
   if (iosAppId) {
     const { data } = await supabaseAdmin
       .from('products')
       .select('*')
       .eq('ios_app_id', iosAppId)
-      .single();
-    if (data) existingProduct = data as Product;
+      .maybeSingle();
+    if (data) product = data;
   }
 
-  if (!existingProduct && androidPackage) {
+  if (!product && androidPackage) {
     const { data } = await supabaseAdmin
       .from('products')
       .select('*')
       .eq('android_package', androidPackage)
-      .single();
-    if (data) existingProduct = data as Product;
+      .maybeSingle();
+    if (data) product = data;
   }
 
-  if (existingProduct) {
-    // Update existing product
+  if (!product && primaryUrl) {
+    const { data } = await supabaseAdmin
+      .from('products')
+      .select('*')
+      .eq('primary_url', primaryUrl)
+      .maybeSingle();
+    if (data) product = data;
+  }
+
+  const name = appName || iosAppId || androidPackage || primaryUrl || 'Unknown app';
+
+  if (!product) {
     const { data, error } = await supabaseAdmin
       .from('products')
-      .update({
-        name: name || existingProduct.name,
-        primary_url: primaryUrl || existingProduct.primary_url,
-        ios_app_id: iosAppId || existingProduct.ios_app_id,
-        android_package: androidPackage || existingProduct.android_package,
-        updated_at: new Date().toISOString(),
+      .insert({
+        name,
+        type: 'mobile_app',
+        primary_url: primaryUrl ?? null,
+        ios_app_id: iosAppId ?? null,
+        android_package: androidPackage ?? null,
       })
-      .eq('id', existingProduct.id)
-      .select()
+      .select('*')
       .single();
 
     if (error) throw error;
-    return data as Product;
+    product = data;
   }
 
-  // Create new product
-  if (!name) {
-    throw new Error('Product name is required when creating a new product');
-  }
-
-  const { data, error } = await supabaseAdmin
-    .from('products')
-    .insert({
-      name,
-      type: 'mobile_app',
-      primary_url: primaryUrl,
-      ios_app_id: iosAppId,
-      android_package: androidPackage,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Product;
-}
-
-/**
- * Create a claim row
- */
-export async function createClaim(
-  productId: string,
-  payload: ClaimPayload
-): Promise<Claim> {
-  const {
-    claimType,
-    claimedValue,
-    currency = 'USD',
-    timeframeText,
-    sourceUrl,
-    rawText,
-  } = payload;
-
-  const { data, error } = await supabaseAdmin
+  // 2) Create claim
+  const { data: claim, error: claimError } = await supabaseAdmin
     .from('claims')
     .insert({
-      product_id: productId,
-      source_url: sourceUrl,
+      product_id: product.id,
+      source_url: sourceUrl ?? null,
       claim_type: claimType,
-      claimed_value: claimedValue,
+      claimed_value: numericClaimedValue,
       currency,
-      timeframe_text: timeframeText,
-      raw_text: rawText,
+      timeframe_text: timeframeText ?? null,
+      raw_text: null,
       status: 'new',
     })
-    .select()
+    .select('*')
     .single();
 
-  if (error) throw error;
-  return data as Claim;
-}
+  if (claimError) throw claimError;
 
-/**
- * Fetch metrics for a product using the store metrics adapter
- */
-export async function fetchMetricsForProduct(
-  product: Product
-): Promise<VerificationMetricInput[]> {
-  const metrics: VerificationMetricInput[] = [];
+  // 3) Fetch metrics (dummy for now)
+  const storeMetrics: StoreMetrics = await fetchStoreMetrics({ iosAppId, androidPackage });
 
-  // Fetch store metrics
-  const storeMetrics = await fetchStoreMetrics({
-    iosAppId: product.ios_app_id || undefined,
-    androidPackage: product.android_package || undefined,
-  });
+  const metricsToInsert: Array<{
+    product_id: string;
+    source: string;
+    metric_name: string;
+    metric_value: number;
+  }> = [];
 
-  // Convert to metric inputs
-  const source = product.ios_app_id ? 'ios_store' : 'android_store';
+  const source = iosAppId ? 'ios_store' : androidPackage ? 'android_store' : 'store_unknown';
 
-  if (storeMetrics.downloadsLifetime !== undefined) {
-    metrics.push({
-      source,
-      metricName: 'downloads_lifetime',
-      metricValue: storeMetrics.downloadsLifetime,
-    });
-  }
-
-  if (storeMetrics.downloads30d !== undefined) {
-    metrics.push({
-      source,
-      metricName: 'downloads_30d',
-      metricValue: storeMetrics.downloads30d,
-    });
-  }
-
-  if (storeMetrics.ratingCount !== undefined) {
-    metrics.push({
-      source,
-      metricName: 'rating_count',
-      metricValue: storeMetrics.ratingCount,
-    });
-  }
-
-  if (storeMetrics.avgRating !== undefined) {
-    metrics.push({
-      source,
-      metricName: 'avg_rating',
-      metricValue: storeMetrics.avgRating,
-    });
-  }
-
-  if (storeMetrics.priceUsd !== undefined) {
-    metrics.push({
-      source,
-      metricName: 'price',
-      metricValue: storeMetrics.priceUsd,
-    });
-  }
-
-  return metrics;
-}
-
-/**
- * Assess a claim based on metrics
- * Simple heuristic implementation
- */
-export async function assessClaim(
-  claim: Claim,
-  metrics: VerificationMetricInput[]
-): Promise<AssessmentResult> {
-  // If there are no metrics at all → verdict = 'no_evidence', confidence = 0.3
-  if (metrics.length === 0) {
-    return {
-      verdict: 'no_evidence',
-      confidence: 0.3,
-      maxPlausibleEstimate: null,
-      notes: 'No metrics available to assess this claim.',
-    };
-  }
-
-  // Extract relevant metrics
-  const downloadsLifetime = metrics.find(m => m.metricName === 'downloads_lifetime')?.metricValue;
-  const priceUsd = metrics.find(m => m.metricName === 'price')?.metricValue || 0;
-
-  // Estimate max plausible monthly revenue
-  // If we have downloadsLifetime, priceUsd, and it looks like a one-time purchase app:
-  // assume 5% conversion from download to paid user
-  // max monthly revenue ≈ (downloadsLifetime * 0.05 * priceUsd) / lifetime_months_estimate
-  // For MVP, just use downloadsLifetime * 0.05 * priceUsd / 3 as a crude 3-month window
-  let maxPlausibleEstimate: number | null = null;
-
-  if (downloadsLifetime && priceUsd > 0) {
-    // One-time purchase app
-    maxPlausibleEstimate = (downloadsLifetime * 0.05 * priceUsd) / 3;
-  } else if (downloadsLifetime) {
-    // Free app with IAP/ads - rough estimate: $2 per active user per month
-    const activeUsers = downloadsLifetime * 0.1; // 10% active users
-    maxPlausibleEstimate = activeUsers * 2 / 3; // Rough monthly estimate
-  }
-
-  const claimedValue = claim.claimed_value;
-
-  // Determine verdict
-  let verdict: 'verified' | 'plausible' | 'unlikely' | 'no_evidence';
-  let confidence: number;
-  let notes: string;
-
-  if (!maxPlausibleEstimate || maxPlausibleEstimate === 0) {
-    verdict = 'no_evidence';
-    confidence = 0.3;
-    notes = 'Unable to estimate plausible revenue from available metrics.';
-  } else if (claimedValue <= 0.5 * maxPlausibleEstimate) {
-    verdict = 'plausible';
-    confidence = 0.7;
-    notes = `Claimed revenue ($${claimedValue.toLocaleString()}/month) is lower than estimated maximum ($${maxPlausibleEstimate.toLocaleString()}/month), which is plausible.`;
-  } else if (claimedValue > 2 * maxPlausibleEstimate) {
-    verdict = 'unlikely';
-    confidence = 0.75;
-    notes = `Claimed revenue ($${claimedValue.toLocaleString()}/month) is significantly higher than estimated maximum ($${maxPlausibleEstimate.toLocaleString()}/month) based on available metrics.`;
-  } else {
-    verdict = 'plausible';
-    confidence = 0.65;
-    notes = `Claimed revenue ($${claimedValue.toLocaleString()}/month) is within plausible range compared to estimated maximum ($${maxPlausibleEstimate.toLocaleString()}/month).`;
-  }
-
-  return {
-    verdict,
-    confidence,
-    maxPlausibleEstimate,
-    notes,
-  };
-}
-
-/**
- * Orchestration function: complete claim check workflow
- */
-export async function runClaimCheck(
-  productInput: ProductInput,
-  claimPayload: ClaimPayload
-): Promise<ClaimCheckResult> {
-  // 1. Upsert product
-  const product = await upsertProductFromInput(productInput);
-
-  // 2. Create claim
-  const claim = await createClaim(product.id, claimPayload);
-
-  // 3. Fetch metrics
-  const metricInputs = await fetchMetricsForProduct(product);
-
-  // 4. Compute assessment
-  const assessmentResult = await assessClaim(claim, metricInputs);
-
-  // 5. Persist verification_metrics
-  if (metricInputs.length > 0) {
-    const metricsToInsert = metricInputs.map(m => ({
+  if (storeMetrics.downloadsLifetime != null) {
+    metricsToInsert.push({
       product_id: product.id,
-      source: m.source,
-      metric_name: m.metricName,
-      metric_value: m.metricValue,
-      extra: m.extra || {},
-      captured_at: new Date().toISOString(),
-    }));
+      source,
+      metric_name: 'downloads_lifetime',
+      metric_value: storeMetrics.downloadsLifetime,
+    });
+  }
+  if (storeMetrics.downloads30d != null) {
+    metricsToInsert.push({
+      product_id: product.id,
+      source,
+      metric_name: 'downloads_30d',
+      metric_value: storeMetrics.downloads30d,
+    });
+  }
+  if (storeMetrics.ratingCount != null) {
+    metricsToInsert.push({
+      product_id: product.id,
+      source,
+      metric_name: 'rating_count',
+      metric_value: storeMetrics.ratingCount,
+    });
+  }
+  if (storeMetrics.avgRating != null) {
+    metricsToInsert.push({
+      product_id: product.id,
+      source,
+      metric_name: 'avg_rating',
+      metric_value: storeMetrics.avgRating,
+    });
+  }
+  if (storeMetrics.priceUsd != null) {
+    metricsToInsert.push({
+      product_id: product.id,
+      source,
+      metric_name: 'price_usd',
+      metric_value: storeMetrics.priceUsd,
+    });
+  }
 
-    const { error: metricsError } = await supabaseAdmin
+  if (metricsToInsert.length > 0) {
+    const { error: vmError } = await supabaseAdmin
       .from('verification_metrics')
       .insert(metricsToInsert);
-
-    if (metricsError) throw metricsError;
+    if (vmError) throw vmError;
   }
 
-  // 6. Persist claim_assessment
-  const { data: assessmentData, error: assessmentError } = await supabaseAdmin
+  // 4) Simple plausibility assessment
+  const downloadsLifetime = storeMetrics.downloadsLifetime ?? 0;
+  const priceUsd = storeMetrics.priceUsd ?? 0;
+
+  let maxPlausibleEstimate: number | null = null;
+  let verdict: 'verified' | 'plausible' | 'unlikely' | 'no_evidence' = 'no_evidence';
+  let confidence = 0.3;
+  let notes = 'Not enough data to make a strong call.';
+
+  if (downloadsLifetime > 0 && priceUsd > 0) {
+    const est = (downloadsLifetime * 0.05 * priceUsd) / 3; // rough as hell
+    maxPlausibleEstimate = est;
+
+    if (numericClaimedValue <= est * 0.5) {
+      verdict = 'plausible';
+      confidence = 0.7;
+      notes = `Based on ~${downloadsLifetime} lifetime downloads and price ~$${priceUsd}, a rough upper bound monthly revenue is about $${est.toFixed(
+        0
+      )}. The claim is below that, so it seems plausible.`;
+    } else if (numericClaimedValue > est * 2) {
+      verdict = 'unlikely';
+      confidence = 0.8;
+      notes = `Based on ~${downloadsLifetime} lifetime downloads and price ~$${priceUsd}, a rough upper bound monthly revenue is about $${est.toFixed(
+        0
+      )}. The claim ($${numericClaimedValue}) is far above that, so it looks unlikely.`;
+    } else {
+      verdict = 'plausible';
+      confidence = 0.5;
+      notes = `The claim is in the same ballpark as a rough estimate based on downloads and price, but the data is noisy.`;
+    }
+  }
+
+  const { data: assessment, error: assessError } = await supabaseAdmin
     .from('claim_assessments')
     .insert({
       claim_id: claim.id,
       assessment_type: 'plausibility',
-      verdict: assessmentResult.verdict,
-      confidence: assessmentResult.confidence,
-      max_plausible_estimate: assessmentResult.maxPlausibleEstimate,
-      notes: assessmentResult.notes,
+      verdict,
+      confidence,
+      max_plausible_estimate: maxPlausibleEstimate,
+      notes,
     })
-    .select()
+    .select('*')
     .single();
 
-  if (assessmentError) throw assessmentError;
-
-  // 7. Update claim status
-  await supabaseAdmin
-    .from('claims')
-    .update({ status: 'analyzed' })
-    .eq('id', claim.id);
-
-  // 8. Fetch stored metrics for response
-  const { data: storedMetrics } = await supabaseAdmin
-    .from('verification_metrics')
-    .select('*')
-    .eq('product_id', product.id)
-    .order('captured_at', { ascending: false });
+  if (assessError) throw assessError;
 
   return {
-    product,
-    claim,
-    assessment: assessmentData as ClaimAssessment,
-    metrics: (storedMetrics || []) as VerificationMetric[],
+    product: {
+      id: product.id,
+      name: product.name,
+      primaryUrl: product.primary_url,
+      iosAppId: product.ios_app_id,
+      androidPackage: product.android_package,
+    },
+    claim: {
+      id: claim.id,
+      claimType: claim.claim_type,
+      claimedValue: claim.claimed_value,
+      currency: claim.currency,
+      timeframeText: claim.timeframe_text,
+      sourceUrl: claim.source_url,
+    },
+    assessment: {
+      verdict: assessment.verdict,
+      confidence: assessment.confidence,
+      maxPlausibleEstimate: assessment.max_plausible_estimate,
+      notes: assessment.notes,
+    },
+    metrics: metricsToInsert.map((m) => ({
+      source: m.source,
+      metricName: m.metric_name,
+      metricValue: m.metric_value,
+    })),
   };
 }
+
